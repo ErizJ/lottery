@@ -28,7 +28,8 @@ var (
 func InitDB() {
 	getLotteryDBConnection()
 	getRedisClient()
-	
+	InitMQ()
+	InitOrder()
 	// 将Mysql中的库存同步到redis
 	InitInventory()
 }
@@ -78,7 +79,7 @@ func createMysqlDB() *gorm.DB {
 	sqlDB.SetMaxOpenConns(100)
 
 	// 设置连接的最大可复用时间
-	sqlDB.SetConnMaxLifetime(10 * time.Second)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 
 	return db
 }

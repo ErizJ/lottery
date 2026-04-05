@@ -18,8 +18,11 @@ func Lottery(probs []float64) int {
 		cumProbs[i] = cumProb
 	}
 
-	// 获取一个(0, cumProb] 的随机数
+	// 获取一个 (0, cumProb] 的随机数，排除 0 避免边界偏差
 	randNum := rand.Float64() * cumProb
+	for randNum == 0 {
+		randNum = rand.Float64() * cumProb
+	}
 	// 查找随机数落在哪个商品
 	index := BinarySearch(cumProbs, randNum)
 
@@ -43,12 +46,13 @@ func BinarySearch(arr []float64, target float64) int {
 		}
 
 		if target > arr[right-1] {
-			return right
+			return right - 1
 		}
 
-		// len(arr) == 2, mid在left和right之间, 选择left的概率值
+		// arr[left] < target <= arr[right-1]，且 left+1==right-1 不可能（上面已处理）
+		// 走到这里说明 target 落在 (arr[left], arr[right-1]] 区间，直接返回 right-1
 		if left == right-1 {
-			return right
+			return right - 1
 		}
 
 		// len(arr) >= 3

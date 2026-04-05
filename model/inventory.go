@@ -6,6 +6,7 @@ import (
 	"lottery/utils/errmsg"
 	"strconv"
 
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -50,29 +51,41 @@ func InitInventory() {
 }
 
 // GetAllInventoryCount 获取所有奖品的剩余库存量，返回的结果只包含id和count
+// 使用 MGET 批量拉取，将 N 次 RTT 降为 2 次（KEYS + MGET）
 func GetAllInventoryCount() []*Inventory {
 	ctx := context.Background()
-	// redis key是prefix+id，value是count
-	keys, err := lotteryRedis.Keys(ctx, prefix + "*").Result() // 根据前缀获取所有奖品的Key
+	keys, err := lotteryRedis.Keys(ctx, prefix+"*").Result()
 	if err != nil {
 		utils.Logger.Error("iterate all keys by prefix failed", zap.String("prefix", prefix), zap.String("err", err.Error()))
-		return nil 
+		return nil
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+
+	vals, err := lotteryRedis.MGet(ctx, keys...).Result()
+	if err != nil {
+		utils.Logger.Error("mget inventory failed", zap.String("err", err.Error()))
+		return nil
 	}
 
 	inventories := make([]*Inventory, 0, len(keys))
-	for _, key := range keys { // 根据奖品Key获得奖品的库存count
-		if id, err := strconv.Atoi(key[len(prefix):]); err != nil {
+	for i, key := range keys {
+		id, err := strconv.Atoi(key[len(prefix):])
+		if err != nil {
 			utils.Logger.Error("invalid redis key", zap.String("key", key))
-		} else {
-			count, err := lotteryRedis.Get(ctx, key).Int() // 根据key从redis中获取库存
-			if err != nil {
-				utils.Logger.Error("invalid inventory", zap.String("errmsg", err.Error()))
-			}
-			inventories = append(inventories, &Inventory{ID: uint(id), Count: count})
+			continue
 		}
-
+		if vals[i] == nil {
+			continue
+		}
+		count, err := strconv.Atoi(vals[i].(string))
+		if err != nil {
+			utils.Logger.Error("invalid inventory value", zap.String("key", key))
+			continue
+		}
+		inventories = append(inventories, &Inventory{ID: uint(id), Count: count})
 	}
-
 	return inventories
 }
 
@@ -136,21 +149,29 @@ func AddInventory(invId uint) int {
 }
 
 
-// DeleteInventory 奖品库存-1
+// luaDecr 原子地检查库存 > 0 再扣减，避免并发时出现负库存
+// 返回 1 表示扣减成功，0 表示库存已空
+var luaDecr = redis.NewScript(`
+local n = tonumber(redis.call("GET", KEYS[1]))
+if n and n > 0 then
+    redis.call("DECR", KEYS[1])
+    return 1
+end
+return 0
+`)
+
+// DeleteInventory 原子扣减奖品库存 -1，库存不足时返回 ERROR
 func DeleteInventory(invId uint) int {
 	ctx := context.Background()
-	n, err := lotteryRedis.Decr(ctx, prefix + strconv.Itoa(int(invId))).Result()	// 返回删除后的库存
-
+	key := prefix + strconv.Itoa(int(invId))
+	res, err := luaDecr.Run(ctx, lotteryRedis, []string{key}).Int()
 	if err != nil {
-		utils.Logger.Error("delete inventory failed", zap.String("errmsg", err.Error()))
-
+		utils.Logger.Error("delete inventory lua failed", zap.String("errmsg", err.Error()))
 		return errmsg.ERROR
 	}
-
-	if n < 0 {
-		utils.Logger.Error("the count of inventory is empty, operation failed", zap.Uint("id", invId))
+	if res == 0 {
+		utils.Logger.Error("inventory empty, decr rejected", zap.Uint("id", invId))
 		return errmsg.ERROR
 	}
-
 	return errmsg.SUCCESS
 }

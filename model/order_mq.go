@@ -21,19 +21,13 @@ var (
 	closeOnce sync.Once
 )
 
-func init() {
-	InitMQ()
-}
-
-// TODO: 同样需要写到配置文件中
 func InitMQ() {
 	writer = &kafka.Writer{
-		Addr: 			kafka.TCP("192.168.197.133:9092"),
-		Topic: 			"order",	
-		AllowAutoTopicCreation: true,	// topic不存在时自动创建
+		Addr:                   kafka.TCP(utils.Conf.Kafka.Addr),
+		Topic:                  utils.Conf.Kafka.Topic,
+		AllowAutoTopicCreation: true,
 	}
-
-	// utils.Logger.Info("create writer to mq")
+	utils.Logger.Info("create writer to mq")
 }
 
 
@@ -43,9 +37,13 @@ func ProduceOrder(userID uint, giftID uint) {
 	writeWg.Add(1)
 
 	// 异步写入mq，不阻塞抽奖
-	go func() {	
+	go func() {
 		defer writeWg.Done()
-		data, _ := json.Marshal(&order)
+		data, err := json.Marshal(&order)
+		if err != nil {
+			utils.Logger.Error("marshal order failed", zap.String("err", err.Error()))
+			return
+		}
 		if err := writer.WriteMessages(context.Background(), kafka.Message{Value: data}); err != nil {
 			utils.Logger.Error("writer kafka failed", zap.String("err", err.Error()))
 		}

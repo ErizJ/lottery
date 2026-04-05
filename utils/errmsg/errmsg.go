@@ -16,7 +16,7 @@ const (
 var codeMsg = map[int]string {
 	ERROR: "FAIL",
 	SUCCESS: "OK",
-	ERROR_GIFTS_NOT_EXIST: "gitfs not exist",
+	ERROR_GIFTS_NOT_EXIST: "gifts not exist",
 }
 
 

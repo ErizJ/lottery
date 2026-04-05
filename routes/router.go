@@ -23,7 +23,7 @@ func InitRoute() {
 	// 设置静态文件目录
 	r.Static("/img", "./view/img")	
 	r.Static("/js", "./view/js")
-	r.StaticFile("./favicon.ico", "views/img/dqq.png")
+	r.StaticFile("/favicon.ico", "view/img/dqq.png")
 	r.LoadHTMLFiles("view/lottery.html") // 应该是index.html
 
 

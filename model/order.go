@@ -4,6 +4,7 @@ import (
 	"lottery/utils"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"go.uber.org/zap"
@@ -22,34 +23,34 @@ type Order struct {
 2. 即便有多台服务器，每台服务器一个协程不断向Mysql写数据，Mysql也承受不住这样的写并发量（不能让mysql的负载跟着服务器的增长而增长）
 */
 var (
-	orderCh = make(chan Order, 10000) // 最高瞬时可以下10000单
-	stopCh  = make(chan struct{}, 1)
-	writeOrderFinish = false 	// true表示所有订单已经持久化到数据库中了
+	orderCh          = make(chan Order, 10000) // 最高瞬时可以下10000单
+	stopCh           = make(chan struct{}, 1)
+	writeOrderFinish int32 // 1 表示所有订单已持久化；用 atomic 避免 data race
 )
 
 
-// 保证channel里面的数据都持久化到数据库
+// listenSingal 保证 channel 里面的数据都持久化到数据库后再退出
 func listenSingal() {
-	c := make(chan os.Signal, 1)  // os.Signal可以容纳各种操作系统级别的信号
-	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM) // 注册信号2和15，收到任意一种信号就会发送到chan里。Ctrl+c对应SIGINT信号，但是如果是信号9就会直接结束
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 
 	for {
-		sig := <- c // 阻塞，直到信号的到来，但是还是可能会被强制结束
-		if writeOrderFinish { // 订单消费完才可退出
-			utils.Logger.Info("recive signal, exit", zap.String("signal", sig.String()))
-			os.Exit(0) // 进程退出
+		sig := <-c
+		if atomic.LoadInt32(&writeOrderFinish) == 1 {
+			utils.Logger.Info("receive signal, exit", zap.String("signal", sig.String()))
+			os.Exit(0)
 		} else {
 			utils.Logger.Info("receive signal, but not exit", zap.String("signal", sig.String()))
 		}
 	}
 }
 
-func init() {
+func InitOrder() {
 	InitChannel()
 
 	go func() {
 		TakeOrder()
-		writeOrderFinish = true
+		atomic.StoreInt32(&writeOrderFinish, 1)
 	}()
 
 	go listenSingal()

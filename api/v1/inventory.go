@@ -15,9 +15,9 @@ func GetAllInvent(ctx *gin.Context) {
 	var code int
 	inventories, code, total := model.GetAllInventoryV1()
 	
-	// 去除敏感信息
-	for _, inv := range inventories {
-		inv.Count = 0
+	// 去除敏感信息（Count 不对前端暴露）
+	for i := range inventories {
+		inventories[i].Count = 0
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
